@@ -1,0 +1,3 @@
+Model,Best_PR_AUC,PR_AUC_STD,ROC_AUC,ROC_AUC_STD,Precision_050,Recall_050,F1_050,Best_Params
+RF Class Weight | 26 Features,0.2645713236336083,0.1181752383989621,0.7243253968253967,0.10367921472812895,0.36666666666666664,0.06666666666666667,0.1119047619047619,"{'n_estimators': 500, 'min_samples_split': 10, 'min_samples_leaf': 1, 'max_features': 'log2', 'max_depth': 6, 'class_weight': {0: 1, 1: 5}}"
+RF + SMOTE | 26 Features,0.2386534598985448,0.12370500202388147,0.7031944444444443,0.0788529458456126,0.39674603174603185,0.2,0.24497983497983497,"{'model__n_estimators': 700, 'model__min_samples_split': 5, 'model__min_samples_leaf': 1, 'model__max_features': 0.5, 'model__max_depth': 12}"
