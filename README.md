@@ -19,6 +19,16 @@ The project includes:
 - LIME explanations
 - FastAPI-based prediction API
 
+## Dataset
+
+This project uses the Cervical Cancer (Risk Factors) dataset from the UCI Machine Learning Repository.
+
+The dataset contains demographic information, habits, medical history, and cervical cancer risk factors. The prediction targets include Hinselmann, Schiller, Cytology, and Biopsy.
+
+Dataset source: UCI Machine Learning Repository.
+
+> The dataset is used for educational and research purposes. No personally identifiable patient information is included in this repository.
+
 ## Project Structure
 
 ```text
