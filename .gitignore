@@ -28,3 +28,5 @@ Thumbs.db
 
 # Logs
 *.log
+# Local accounts/history database (created at runtime; never commit user data)
+/data/

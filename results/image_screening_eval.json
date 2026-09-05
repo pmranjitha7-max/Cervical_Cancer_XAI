@@ -1,0 +1,31 @@
+{
+  "multiclass_accuracy": 0.8964285714285715,
+  "binary_accuracy": 0.9892857142857143,
+  "binary_f1_abnormal": 0.9905362776025236,
+  "binary_confusion_matrix": [
+    [
+      120,
+      0
+    ],
+    [
+      3,
+      157
+    ]
+  ],
+  "binary_labels": [
+    "Normal",
+    "Abnormal"
+  ],
+  "multiclass_classification_report": "                     precision    recall  f1-score   support\n\n  carcinoma_in_situ       0.83      0.97      0.90        40\n   light_dysplastic       0.97      0.78      0.86        40\nmoderate_dysplastic       0.71      1.00      0.83        40\n    normal_columnar       0.95      1.00      0.98        40\nnormal_intermediate       1.00      1.00      1.00        40\n normal_superficiel       0.98      1.00      0.99        40\n  severe_dysplastic       0.95      0.53      0.68        40\n\n           accuracy                           0.90       280\n          macro avg       0.91      0.90      0.89       280\n       weighted avg       0.91      0.90      0.89       280\n",
+  "classes": [
+    "carcinoma_in_situ",
+    "light_dysplastic",
+    "moderate_dysplastic",
+    "normal_columnar",
+    "normal_intermediate",
+    "normal_superficiel",
+    "severe_dysplastic"
+  ],
+  "n_train": 1120,
+  "n_test": 280
+}

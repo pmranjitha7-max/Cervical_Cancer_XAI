@@ -1,8 +1,24 @@
-from fastapi import FastAPI, HTTPException
+import os
+
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Header
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import joblib
 import pandas as pd
 import numpy as np
 import shap
+
+from . import db
+from . import auth
+from .image_screening_report import ImageScreeningModel
+
+# api.py lives in <project_root>/src/, but dataset/ and models/ are
+# siblings of src/ at the project root — so go up two levels.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def path(*parts):
+    return os.path.join(BASE_DIR, *parts)
 
 
 # =========================================================
@@ -15,8 +31,21 @@ app = FastAPI(
         "Explainable AI based cervical cancer risk "
         "classification API using Random Forest and SHAP."
     ),
-    version="4.0"
+    version="5.0"
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+def _startup():
+    db.init_db()
 
 
 # =========================================================
@@ -24,7 +53,7 @@ app = FastAPI(
 # =========================================================
 
 df = pd.read_csv(
-    "dataset/cleaned_cervical_cancer.csv"
+    path("dataset", "cleaned_cervical_cancer.csv")
 )
 
 
@@ -33,11 +62,11 @@ df = pd.read_csv(
 # =========================================================
 
 biopsy_model = joblib.load(
-    "models/biopsy_model.pkl"
+    path("models", "biopsy_model.pkl")
 )
 
 hpv_model = joblib.load(
-    "models/hpv_model.pkl"
+    path("models", "hpv_model.pkl")
 )
 
 
@@ -46,15 +75,15 @@ hpv_model = joblib.load(
 # =========================================================
 
 cancer_model = joblib.load(
-    "models/cancer_model.pkl"
+    path("models", "cancer_model.pkl")
 )
 
 cancer_features = joblib.load(
-    "models/cancer_features.pkl"
+    path("models", "cancer_features.pkl")
 )
 
 cancer_threshold = joblib.load(
-    "models/cancer_threshold.pkl"
+    path("models", "cancer_threshold.pkl")
 )
 
 
@@ -65,6 +94,21 @@ cancer_threshold = joblib.load(
 cancer_explainer = shap.TreeExplainer(
     cancer_model
 )
+
+
+# =========================================================
+# LOAD IMAGE SCREENING MODEL (optional — the API still runs
+# fine without it, /image-screening just reports unavailable)
+# =========================================================
+
+try:
+    image_screening_model = ImageScreeningModel(
+        path("models", "image_screening_model.pkl"),
+        path("models", "image_screening_features.pkl"),
+        path("models", "image_screening_classes.pkl"),
+    )
+except Exception as _e:  # pragma: no cover - defensive only
+    image_screening_model = None
 
 
 # =========================================================
@@ -276,7 +320,7 @@ def home():
             ),
 
         "version":
-            "4.0",
+            "5.0",
 
         "cancer_classification_threshold":
             float(cancer_threshold),
@@ -284,6 +328,11 @@ def home():
         "available_endpoints": [
             "/predict",
             "/cancer-report",
+            "/image-screening",
+            "/auth/register",
+            "/auth/login",
+            "/profile",
+            "/history",
             "/docs"
         ]
     }
@@ -446,7 +495,8 @@ def predict(
 
 @app.get("/cancer-report")
 def cancer_report(
-    patient_id: int = 0
+    patient_id: int = 0,
+    current_user=Depends(auth.get_optional_user),
 ):
 
     validate_patient_id(
@@ -723,7 +773,7 @@ def cancer_report(
     # COMPLETE RESPONSE
     # =====================================================
 
-    return {
+    response = {
 
         "patient_id":
             patient_id,
@@ -819,3 +869,174 @@ def cancer_report(
                 "It is not a confirmed medical diagnosis."
             )
     }
+
+    if current_user is not None:
+        db.add_history_entry(
+            user_id=current_user["id"],
+            kind="assessment",
+            title=f"Patient #{patient_id}",
+            result=cancer_result,
+            risk_percent=response["overall_cancer_prediction"]["cancer_probability_percent"],
+            details=response,
+        )
+
+    return response
+
+
+# =========================================================
+# IMAGE SCREENING ENDPOINT
+# =========================================================
+
+@app.post("/image-screening")
+async def image_screening(
+    file: UploadFile = File(...),
+    current_user=Depends(auth.get_optional_user),
+):
+    if image_screening_model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The image screening model is not available on this server.",
+        )
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="No image data received.")
+
+    try:
+        report = image_screening_model.screen(contents)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read this image. Please upload a clear JPG/PNG cell image. ({exc})",
+        )
+
+    if current_user is not None:
+        db.add_history_entry(
+            user_id=current_user["id"],
+            kind="image_screening",
+            title=file.filename or "Cell image",
+            result=report["screening_result"],
+            risk_percent=report["abnormal_probability_percent"],
+            details=report,
+        )
+
+    return report
+
+
+# =========================================================
+# AUTH ENDPOINTS
+# =========================================================
+
+class RegisterRequest(BaseModel):
+    name: str
+    username: str
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    name: str
+    email: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+def _user_public(user) -> dict:
+    return {
+        "id": user["id"],
+        "name": user["name"],
+        "username": user["username"],
+        "email": user["email"],
+    }
+
+
+@app.post("/auth/register")
+def register(body: RegisterRequest):
+    name, username, email = body.name.strip(), body.username.strip(), body.email.strip().lower()
+    auth.validate_registration(name, username, email, body.password)
+
+    if db.get_user_by_username(username):
+        raise HTTPException(409, "That username is already taken.")
+    if db.get_user_by_email(email):
+        raise HTTPException(409, "An account with that email already exists.")
+
+    password_hash, salt = auth.hash_password(body.password)
+    user = db.create_user(name, username, email, password_hash, salt)
+    token = db.create_session(user["id"])
+    return {"token": token, "user": _user_public(user)}
+
+
+@app.post("/auth/login")
+def login(body: LoginRequest):
+    username = body.username.strip()
+    user = db.get_user_by_username(username) or db.get_user_by_email(username.lower())
+    if user is None or not auth.verify_password(body.password, user["password_hash"], user["password_salt"]):
+        raise HTTPException(401, "Incorrect username or password.")
+    token = db.create_session(user["id"])
+    return {"token": token, "user": _user_public(user)}
+
+
+@app.post("/auth/logout")
+def logout(authorization: str | None = Header(default=None), current_user=Depends(auth.get_current_user)):
+    token = authorization.split(" ", 1)[1].strip()
+    db.delete_session(token)
+    return {"message": "Signed out."}
+
+
+@app.get("/profile")
+def get_profile(current_user=Depends(auth.get_current_user)):
+    return _user_public(current_user)
+
+
+@app.put("/profile")
+def update_profile(body: ProfileUpdateRequest, current_user=Depends(auth.get_current_user)):
+    name, email = body.name.strip(), body.email.strip().lower()
+    if len(name) < 2:
+        raise HTTPException(400, "Please enter your full name.")
+    if not auth.EMAIL_RE.match(email):
+        raise HTTPException(400, "Please enter a valid email address.")
+    existing = db.get_user_by_email(email)
+    if existing is not None and existing["id"] != current_user["id"]:
+        raise HTTPException(409, "That email is already used by another account.")
+    updated = db.update_user_profile(current_user["id"], name, email)
+    return _user_public(updated)
+
+
+@app.post("/auth/change-password")
+def change_password(body: ChangePasswordRequest, current_user=Depends(auth.get_current_user)):
+    if not auth.verify_password(body.current_password, current_user["password_hash"], current_user["password_salt"]):
+        raise HTTPException(400, "Current password is incorrect.")
+    if len(body.new_password) < 8:
+        raise HTTPException(400, "New password must be at least 8 characters.")
+    password_hash, salt = auth.hash_password(body.new_password)
+    db.update_user_password(current_user["id"], password_hash, salt)
+    return {"message": "Password updated successfully."}
+
+
+# =========================================================
+# HISTORY ENDPOINTS
+# =========================================================
+
+@app.get("/history")
+def get_history(current_user=Depends(auth.get_current_user)):
+    return {"history": db.list_history(current_user["id"])}
+
+
+@app.delete("/history")
+def clear_history(current_user=Depends(auth.get_current_user)):
+    db.clear_history(current_user["id"])
+    return {"message": "History cleared."}
+
+
+@app.delete("/history/{entry_id}")
+def delete_history_entry(entry_id: int, current_user=Depends(auth.get_current_user)):
+    db.delete_history_entry(current_user["id"], entry_id)
+    return {"message": "Entry deleted."}
