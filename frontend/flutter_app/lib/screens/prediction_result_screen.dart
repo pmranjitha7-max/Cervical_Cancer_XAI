@@ -1,6 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../models.dart';
+import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
@@ -36,6 +41,40 @@ class PredictionResultScreen extends StatelessWidget {
           Text('Classification threshold: ${report.thresholdPercent.toStringAsFixed(1)}%',
               style: const TextStyle(color: AppColors.muted)),
         ])),
+        const SizedBox(height: 14),
+
+SizedBox(
+  width: double.infinity,
+  child: ElevatedButton.icon(
+    icon: const Icon(Icons.picture_as_pdf_outlined),
+    label: const Text('Download Report as PDF'),
+    onPressed: () async {
+      try {
+        final pdfBytes =
+            await Session.i.api.downloadCancerReportPdf(report.patientId);
+
+        final directory = await getApplicationDocumentsDirectory();
+
+        final file = File(
+          '${directory.path}/CerviXAI_Patient_${report.patientId}_Report.pdf',
+        );
+
+        await file.writeAsBytes(pdfBytes);
+
+        await Share.shareXFiles(
+          [XFile(file.path)],
+          text: 'CerviXAI Assessment Report - Patient #${report.patientId}',
+        );
+      } catch (e) {
+        if (!context.mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    },
+  ),
+),
         const SizedBox(height: 14),
         sectionCard(
           context,

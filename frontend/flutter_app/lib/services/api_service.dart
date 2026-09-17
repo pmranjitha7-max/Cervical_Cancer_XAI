@@ -7,7 +7,7 @@ import '../models.dart';
 
 const kApiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'http://10.130.181.238:8000',
+  defaultValue: 'http://10.206.116.238:8000',
 );
 
 class ApiException implements Exception {
@@ -164,6 +164,28 @@ class ApiService {
     final j = await _getJson('/cancer-report', query: {'patient_id': patientId}, auth: true);
     return AssessmentReport.fromJson(j);
   }
+  Future<Uint8List> downloadCancerReportPdf(int patientId) async {
+  final http.Response r;
+
+  try {
+    r = await http
+        .get(
+          _uri('/cancer-report/pdf', {'patient_id': patientId}),
+          headers: _authHeaders,
+        )
+        .timeout(const Duration(seconds: 30));
+  } catch (_) {
+    throw ApiException(
+      'Could not reach the server. Check your connection and the backend address.',
+    );
+  }
+
+  if (r.statusCode >= 200 && r.statusCode < 300) {
+    return r.bodyBytes;
+  }
+
+  throw ApiException(_extractError(r));
+}
 
   Future<ImageScreeningReport> runImageScreening(Uint8List bytes, String filename) async {
     final uri = _uri('/image-screening');
@@ -196,4 +218,43 @@ class ApiService {
   Future<void> clearHistory() => _delete('/history');
 
   Future<void> deleteHistoryEntry(int id) => _delete('/history/$id');
+
+Future<Uint8List> downloadImageScreeningPdf(
+  Uint8List imageBytes,
+  String filename,
+) async {
+  final request = http.MultipartRequest(
+    'POST',
+    _uri('/image-screening/pdf'),
+  );
+
+  request.headers.addAll(_authHeaders);
+
+  request.files.add(
+    http.MultipartFile.fromBytes(
+      'file',
+      imageBytes,
+      filename: filename,
+    ),
+  );
+
+  try {
+    final streamedResponse =
+        await request.send().timeout(const Duration(seconds: 30));
+
+    final response = await http.Response.fromStream(streamedResponse);
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return response.bodyBytes;
+    }
+
+    throw ApiException(_extractError(response));
+  } catch (e) {
+    if (e is ApiException) rethrow;
+
+    throw ApiException(
+      'Could not reach the server. Check your connection and the backend address.',
+    );
+  }
+}
 }

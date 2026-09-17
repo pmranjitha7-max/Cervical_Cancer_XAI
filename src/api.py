@@ -11,6 +11,7 @@ import shap
 from . import db
 from . import auth
 from .image_screening_report import ImageScreeningModel
+from .pdf_reports import create_cancer_pdf, create_image_screening_pdf
 
 # api.py lives in <project_root>/src/, but dataset/ and models/ are
 # siblings of src/ at the project root — so go up two levels.
@@ -1040,3 +1041,72 @@ def clear_history(current_user=Depends(auth.get_current_user)):
 def delete_history_entry(entry_id: int, current_user=Depends(auth.get_current_user)):
     db.delete_history_entry(current_user["id"], entry_id)
     return {"message": "Entry deleted."}
+# =========================================================
+# DOWNLOAD CANCER REPORT AS PDF
+# =========================================================
+
+@app.get("/cancer-report/pdf")
+def download_cancer_report_pdf(
+    patient_id: int = 0,
+    current_user=Depends(auth.get_optional_user),
+):
+    # Generate the same cancer + XAI report
+    report = cancer_report(
+        patient_id=patient_id,
+        current_user=current_user,
+    )
+
+    # Convert report to professional PDF
+    pdf_buffer = create_cancer_pdf(report)
+
+    from fastapi.responses import StreamingResponse
+
+    filename = f"CerviXAI_Patient_{patient_id}_Report.pdf"
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
+    )
+@app.post("/image-screening/pdf")
+async def download_image_screening_pdf(
+    file: UploadFile = File(...),
+    current_user=Depends(auth.get_optional_user),
+):
+    contents = await file.read()
+
+    if not contents:
+        raise HTTPException(
+            status_code=400,
+            detail="No image data received.",
+        )
+
+    if image_screening_model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The image screening model is not available on this server.",
+        )
+
+    try:
+        report = image_screening_model.screen(contents)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read this image. Please upload a clear JPG/PNG cell image. ({exc})",
+        )
+
+    pdf_buffer = create_image_screening_pdf(report, contents)
+
+    from fastapi.responses import StreamingResponse
+
+    filename = "CerviXAI_Image_Screening_Report.pdf"
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
+    )
