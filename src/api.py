@@ -1097,7 +1097,9 @@ async def download_image_screening_pdf(
             detail=f"Could not read this image. Please upload a clear JPG/PNG cell image. ({exc})",
         )
 
-    pdf_buffer = create_image_screening_pdf(report, contents)
+    patient_id = current_user["id"] if current_user is not None else "N/A"
+
+    pdf_buffer = create_image_screening_pdf(report, contents, patient_id)
 
     from fastapi.responses import StreamingResponse
 
